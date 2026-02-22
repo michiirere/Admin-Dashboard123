@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Unique Admin System</title>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+*{box-sizing:border-box;font-family:"Segoe UI",Tahoma}
+body{margin:0;background:linear-gradient(135deg,#f4f7ff,#fde2f3)}
+.dark{background:#0f172a;color:white}
+
+/* LOGIN */
+.login{max-width:400px;margin:100px auto;background:white;padding:30px;border-radius:16px}
+.login input,button{width:100%;padding:12px;margin:8px 0;border-radius:8px;border:1px solid #ccc}
+button{background:#4f46e5;color:white;border:none;font-weight:bold;cursor:pointer}
+
+/* DASH */
+.dashboard{display:none;min-height:100vh}
+.sidebar{width:220px;background:#4f46e5;color:white;padding:20px;position:fixed;height:100vh}
+.sidebar button{width:100%;background:#7c3aed;margin:6px 0;padding:12px;border:none;border-radius:10px}
+.main{margin-left:220px;padding:30px}
+
+.card{background:white;padding:25px;border-radius:18px;margin-bottom:25px}
+.dark .card{background:#1e293b}
+
+/* ANALYTICS */
+.analytics-wrap{display:flex;gap:30px;align-items:center;flex-wrap:wrap}
+.analytics-wrap canvas{max-width:260px!important;max-height:260px!important;background:white;border-radius:16px;padding:10px}
+.dark canvas{background:#020617}
+</style>
+</head>
+
+<body>
+
+<div class="login" id="loginBox">
+<h2>Admin Login</h2>
+<input id="email" placeholder="Email">
+<input id="pass" type="password" placeholder="Password">
+<button onclick="login()">Login</button>
+<button onclick="signup()">Sign Up</button>
+</div>
+
+<div class="dashboard" id="dash">
+<div class="sidebar">
+<h2>Admin</h2>
+<button onclick="show('dashPage')">Dashboard</button>
+<button onclick="show('usersPage')">Users</button>
+<button onclick="show('analyticsPage')">Analytics</button>
+<button onclick="toggleMode()">🌙 Dark Mode</button>
+<button onclick="logout()">Logout</button>
+</div>
+
+<div class="main">
+<h1 id="welcome"></h1>
+
+<div id="dashPage" class="card">
+<h3>Total Users</h3>
+<p id="total">0</p>
+</div>
+
+<div id="usersPage" class="card" style="display:none">
+<h3>Manage Users</h3>
+<input id="uName" placeholder="Name (optional)">
+<input id="uEmail" placeholder="Email">
+<button onclick="addUser()">Add User</button>
+<ul id="users"></ul>
+</div>
+
+<div id="analyticsPage" class="card" style="display:none">
+<h3>User Analytics</h3>
+<p id="usageText">No usage data yet</p>
+
+<div class="analytics-wrap">
+<canvas id="pieChart"></canvas>
+<canvas id="barChart"></canvas>
+</div>
+</div>
+
+</div>
+</div>
+
+<script>
+firebase.initializeApp({
+  apiKey:"AIzaSyDHygqA69ElWGFF02QxWCVmOeedRpEIYFk",
+  authDomain:"silentabcapp.firebaseapp.com",
+  projectId:"silentabcapp"
+});
+
+const auth=firebase.auth();
+const db=firebase.firestore();
+
+function toggleMode(){
+  document.body.classList.toggle("dark");
+}
+
+function signup(){
+  auth.createUserWithEmailAndPassword(email.value,pass.value)
+  .then(()=>alert("Signup success"))
+  .catch(e=>alert(e.message));
+}
+
+function login(){
+  if(!email.value||!pass.value) return alert("Fill login fields");
+  auth.signInWithEmailAndPassword(email.value,pass.value)
+  .then(u=>{
+    loginBox.style.display="none";
+    dash.style.display="block";
+    welcome.innerText="Welcome "+u.user.email;
+    loadUsers();
+  })
+  .catch(e=>alert(e.message));
+}
+
+function logout(){
+  auth.signOut().then(()=>{
+    dash.style.display="none";
+    loginBox.style.display="block";
+  });
+}
+
+function show(id){
+  ["dashPage","usersPage","analyticsPage"]
+  .forEach(p=>document.getElementById(p).style.display="none");
+  document.getElementById(id).style.display="block";
+}
+
+/* USERS */
+function addUser(){
+  if(!uEmail.value){
+    alert("Email required"); return;
+  }
+
+  let nameVal = uName.value || "User";
+
+  db.collection("users").add({
+    name:nameVal,
+    email:uEmail.value,
+    signToTextCount:0,
+    textToSignCount:0
+  });
+
+  uName.value="";
+  uEmail.value="";
+  loadUsers();
+}
+
+function loadUsers(){
+  users.innerHTML="";
+  db.collection("users").get().then(snap=>{
+    total.innerText=snap.size;
+    snap.forEach(doc=>{
+      users.innerHTML+=`
+        <li>${doc.data().name} (${doc.data().email})
+        <button onclick="viewAnalytics('${doc.id}')">📊</button></li>`;
+    });
+  });
+}
+
+/* ANALYTICS */
+let pieChart, barChart;
+
+function viewAnalytics(id){
+  show("analyticsPage");
+
+  const pieEl=document.getElementById("pieChart");
+  const barEl=document.getElementById("barChart");
+
+  db.collection("users").doc(id).get().then(doc=>{
+    const d=doc.data();
+    const stt=d.signToTextCount||0;
+    const tts=d.textToSignCount||0;
+    const total=stt+tts;
+
+    if(pieChart)pieChart.destroy();
+    if(barChart)barChart.destroy();
+
+    if(total===0){
+      usageText.innerText="No usage data yet";
+
+      pieChart=new Chart(pieEl,{
+        type:"pie",
+        data:{
+          labels:["Sign-to-Text","Text-to-Sign"],
+          datasets:[{data:[50,50],backgroundColor:["#c7d2fe","#ddd6fe"]}]
+        }
+      });
+
+      barChart=new Chart(barEl,{
+        type:"bar",
+        data:{
+          labels:["Sign-to-Text","Text-to-Sign"],
+          datasets:[{data:[0,0],backgroundColor:["#4f46e5","#7c3aed"]}]
+        },
+        options:{scales:{y:{beginAtZero:true,max:100}}}
+      });
+      return;
+    }
+
+    const sttP=Math.round((stt/total)*100);
+    const ttsP=Math.round((tts/total)*100);
+
+    usageText.innerText=`Sign-to-Text: ${sttP}% | Text-to-Sign: ${ttsP}%`;
+
+    pieChart=new Chart(pieEl,{
+      type:"pie",
+      data:{
+        labels:["Sign-to-Text","Text-to-Sign"],
+        datasets:[{data:[stt,tts],backgroundColor:["#4f46e5","#7c3aed"]}]
+      }
+    });
+
+    barChart=new Chart(barEl,{
+      type:"bar",
+      data:{
+        labels:["Sign-to-Text","Text-to-Sign"],
+        datasets:[{data:[sttP,ttsP],backgroundColor:["#4f46e5","#7c3aed"]}]
+      },
+      options:{scales:{y:{beginAtZero:true,max:100}}}
+    });
+  });
+}
+</script>
+
+</body>
+</html>
